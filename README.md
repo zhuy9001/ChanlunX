@@ -64,4 +64,4 @@ NOTEXT_DDUANSE1:STICKLINE(DUANSE1,DUANZD1,DUANZG1,0,0),COLORFF8000;{画段中枢
 - 纷传圈子：http://s.a0c.top/uHvyCEy/4KHZ
 - WeChat: kldcty
 - QQ: 1106628276
-- 微信公众号: mywildquant
+- 微信公众号: KLDLab
