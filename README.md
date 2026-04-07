@@ -56,7 +56,15 @@ NOTEXT_DDUANZD1:IF(DUANZD1,DUANZD1,DRAWNULL),COLORFF8000;{画段中枢低}
 NOTEXT_DDUANSE1:STICKLINE(DUANSE1,DUANZD1,DUANZG1,0,0),COLORFF8000;{画段中枢起始结束};
 ```
 
-## 交流
+## 社区
+
+如果开源版不知道自己怎么动手搞定的，可以参与我的社区，我会协助你安装。
+
+### 安装指南
+
+- [番茄缠论插件 FqChan04 TDX 安装指南 20260405 更新](https://mp.weixin.qq.com/s/v3uchXfQLACdeEoV6CN65Q)
+
+### 更多
 
 - 支持作者：https://mp.weixin.qq.com/s/xKBIlmBp9iyYg7wpLc5bPw
 - 给作者充电：http://s.a0c.top/lJ1c8WZ/4KHZ
