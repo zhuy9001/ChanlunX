@@ -1,4 +1,5 @@
 ﻿#include "Main.h"
+#include "ChanlunTdx.h"
 #include <iostream>
 #include <fstream>
 
@@ -201,6 +202,31 @@ static PluginTCalcFuncInfo Info[] =
         {7, &Func7},
         {8, &Func8},
         {9, &Func9},
+        {100, &Func100},
+        {101, &Func101},
+        {102, &Func102},
+        {103, &Func103},
+        {104, &Func104},
+        {105, &Func105},
+        {110, &Func110},
+        {120, &Func120},
+        {200, &Func200},
+        {201, &Func201},
+        {202, &Func202},
+        {203, &Func203},
+        {204, &Func204},
+        {205, &Func205},
+        {210, &Func210},
+        {211, &Func211},
+        {212, &Func212},
+        {213, &Func213},
+        {214, &Func214},
+        {215, &Func215},
+        {216, &Func216},
+        {300, &Func300},
+        {320, &Func320},
+        {400, &Func400},
+        {900, &Func900},
         {0, NULL}};
 
 BOOL RegisterTdxFunc(PluginTCalcFuncInfo **pInfo)
