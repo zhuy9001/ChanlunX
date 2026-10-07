@@ -24,7 +24,9 @@ enum class StructureStatus
     Invalid = -1,
     None = 0,
     Candidate = 1,
-    Confirmed = 2
+    Confirmed = 2,
+    Extending = 3,
+    Terminated = 4
 };
 
 enum class TrendKind
@@ -95,6 +97,10 @@ struct Pivot
     float gg;
     float dd;
     StructureStatus status;
+    std::vector<int> strokeIndices;
+    int confirmationIndex = -1;
+    int terminationIndex = -1;
+    int relatedPivotIndex = -1;
 };
 
 struct TrendSnapshot

@@ -55,6 +55,114 @@ chanlun::Segment makeSegment(int start, int end, chanlun::Direction direction, f
     return segment;
 }
 
+void testStrokeConfirmationRequiresValidReverseStroke()
+{
+    std::vector<chanlun::MergedBar> bars;
+    for (int index = 0; index <= 12; ++index)
+    {
+        bars.push_back({15, 10, chanlun::Direction::None, index, index, index});
+    }
+    bars[0].low = 5;
+    bars[4].high = 20;
+    bars[8].low = 8;
+    bars[12].high = 23;
+    const std::vector<chanlun::Fractal> fractals{
+        {chanlun::FractalType::Bottom, 0, 0, 5},
+        {chanlun::FractalType::Top, 4, 4, 20},
+        {chanlun::FractalType::Bottom, 8, 8, 8},
+        {chanlun::FractalType::Top, 12, 12, 23},
+    };
+    const auto candidate = chanlun::buildStrokes(bars, {fractals[0], fractals[1]});
+    require(candidate.size() == 1 && candidate.back().status == chanlun::StructureStatus::Candidate,
+            "a stroke without a valid reverse stroke remains candidate");
+    const auto confirmed = chanlun::buildStrokes(bars, fractals);
+    require(confirmed.size() == 3 && confirmed[0].status == chanlun::StructureStatus::Confirmed &&
+                confirmed[1].status == chanlun::StructureStatus::Confirmed &&
+                confirmed[2].status == chanlun::StructureStatus::Candidate,
+            "only strokes followed by valid reverse strokes are confirmed");
+    require(chanlun::buildStrokePivots(confirmed).empty(),
+            "candidate third stroke cannot confirm a pivot");
+    require(chanlun::buildSegments(confirmed).empty(),
+            "candidate third stroke cannot form a segment");
+}
+
+void testLaterExtremePreservesConfirmedPrefix()
+{
+    for (bool mirrored : {false, true})
+    {
+        std::vector<chanlun::MergedBar> bars;
+        for (int index = 0; index <= 16; ++index)
+        {
+            bars.push_back({15, 10, chanlun::Direction::None, index, index, index});
+        }
+        bars[0].low = 5;
+        bars[4].high = 20;
+        bars[8].low = 8;
+        bars[10].high = 22;
+        bars[12].high = 24;
+        bars[16].low = 7;
+        std::vector<chanlun::Fractal> fractals{
+            {chanlun::FractalType::Bottom, 0, 0, 5},
+            {chanlun::FractalType::Top, 4, 4, 20},
+            {chanlun::FractalType::Bottom, 8, 8, 8},
+            {chanlun::FractalType::Top, 10, 10, 22},
+            {chanlun::FractalType::Top, 12, 12, 24},
+            {chanlun::FractalType::Bottom, 16, 16, 7},
+        };
+        if (mirrored)
+        {
+            for (auto &bar : bars)
+            {
+                const float high = bar.high;
+                bar.high = 30 - bar.low;
+                bar.low = 30 - high;
+            }
+            for (auto &fractal : fractals)
+            {
+                fractal.type = fractal.type == chanlun::FractalType::Top
+                    ? chanlun::FractalType::Bottom : chanlun::FractalType::Top;
+                fractal.price = 30 - fractal.price;
+            }
+        }
+        const auto full = chanlun::buildStrokes(bars, fractals);
+        require(full.size() == 4 && full[0].startIndex == 0 && full[0].endIndex == 4 &&
+                    full[1].startIndex == 4 && full[1].endIndex == 8 &&
+                    full[2].startIndex == 8 && full[2].endIndex == 12 &&
+                    full[3].startIndex == 12 && full[3].endIndex == 16,
+                "later valid turn restores only the affected tail in both directions");
+        for (size_t count = 3; count <= fractals.size(); ++count)
+        {
+            const std::vector<chanlun::Fractal> prefix(fractals.begin(), fractals.begin() + count);
+            const auto partial = chanlun::buildStrokes(bars, prefix);
+            require(!partial.empty() && partial[0].startIndex == 0 && partial[0].endIndex == 4,
+                    "append-only changes retain the unaffected confirmed prefix");
+        }
+    }
+}
+
+void testSegmentOutputsAreDisabled()
+{
+    const std::vector<chanlun::Stroke> strokes{
+        makeStroke(0, 4, chanlun::Direction::Up, 20, 5),
+        makeStroke(4, 8, chanlun::Direction::Down, 20, 8),
+        makeStroke(8, 12, chanlun::Direction::Up, 24, 8),
+    };
+    require(chanlun::buildSegments(strokes).empty(), "segment recognition is disabled");
+    const std::vector<float> high{10, 12, 15, 20, 18, 16, 14, 12, 14, 18, 22, 24, 20};
+    const std::vector<float> low{5, 7, 10, 15, 13, 11, 9, 8, 9, 13, 17, 19, 15};
+    const auto analysis = chanlun::analyze(high, low, {});
+    require(!analysis.strokes.empty(), "disabling segments preserves stroke recognition");
+    require(analysis.segments.empty() && analysis.pivots.empty(),
+            "analysis no longer produces segments or segment pivots");
+    for (int function : {120, 200, 201, 202, 203, 204, 205, 300, 400})
+    {
+        for (float value : chanlun::evaluateTdxFunction(function, high, low, {}))
+        {
+            requireNear(value, 0, "disabled segment-dependent outputs return zero");
+        }
+    }
+}
+
 void testSequentialContainmentUsesTrendDirection()
 {
     const std::vector<float> high{10.0F, 11.0F, 10.5F, 12.0F};
@@ -115,19 +223,29 @@ void testStrokesRequireAlternatingIndependentFractals()
     require(strokes[1].startIndex == 5 && strokes[1].endIndex == 9, "up stroke endpoints are preserved");
 }
 
-void testSegmentsRequireThreeOverlappingStrokes()
+
+
+
+
+
+
+
+
+
+
+
+
+void testCandidateSegmentsDoNotFormPivots()
 {
-    const std::vector<chanlun::Stroke> strokes{
-        makeStroke(1, 3, chanlun::Direction::Down, 12.0F, 8.0F),
-        makeStroke(3, 5, chanlun::Direction::Up, 11.0F, 9.0F),
-        makeStroke(5, 7, chanlun::Direction::Down, 13.0F, 10.0F),
+    std::vector<chanlun::Segment> segments{
+        makeSegment(1, 3, chanlun::Direction::Up, 12.0F, 8.0F),
+        makeSegment(3, 5, chanlun::Direction::Down, 11.0F, 9.0F),
+        makeSegment(5, 7, chanlun::Direction::Up, 13.0F, 10.0F),
     };
+    segments[2].status = chanlun::StructureStatus::Candidate;
 
-    const auto segments = chanlun::buildSegments(strokes);
-
-    require(segments.size() == 1, "three overlapping strokes form a segment");
-    require(segments[0].startIndex == 1 && segments[0].endIndex == 7, "segment spans the three strokes");
-    require(segments[0].direction == chanlun::Direction::Down, "segment keeps first stroke direction");
+    require(chanlun::buildPivots(segments).empty(),
+            "unconfirmed segment cannot contribute to a segment-level pivot");
 }
 
 void testPivotsUseThreeOverlappingSegments()
@@ -145,6 +263,90 @@ void testPivotsUseThreeOverlappingSegments()
     requireNear(pivots[0].zg, 11.0F, "pivot ZG is min high");
     requireNear(pivots[0].dd, 8.0F, "pivot DD is min low");
     requireNear(pivots[0].gg, 13.0F, "pivot GG is max high");
+}
+
+void testPivotsRequireConnectedConfirmedSegments()
+{
+    const std::vector<chanlun::Segment> segments{
+        makeSegment(1, 3, chanlun::Direction::Up, 12.0F, 8.0F),
+        makeSegment(4, 5, chanlun::Direction::Down, 11.0F, 9.0F),
+        makeSegment(5, 7, chanlun::Direction::Up, 13.0F, 10.0F),
+    };
+
+    require(chanlun::buildPivots(segments).empty(), "disconnected segments do not form a pivot");
+}
+
+void testPivotAllowsSinglePriceOverlap()
+{
+    const std::vector<chanlun::Segment> segments{
+        makeSegment(1, 3, chanlun::Direction::Up, 12.0F, 8.0F),
+        makeSegment(3, 5, chanlun::Direction::Down, 13.0F, 10.0F),
+        makeSegment(5, 7, chanlun::Direction::Up, 14.0F, 12.0F),
+    };
+
+    const auto pivots = chanlun::buildPivots(segments);
+
+    require(pivots.size() == 1, "single-price boundary overlap forms a pivot");
+    requireNear(pivots[0].zg, 12.0F, "single-price pivot upper boundary");
+    requireNear(pivots[0].zd, 12.0F, "single-price pivot lower boundary");
+}
+
+void testPivotExtensionDoesNotCreateSlidingWindowDuplicates()
+{
+    const std::vector<chanlun::Segment> segments{
+        makeSegment(1, 3, chanlun::Direction::Up, 12.0F, 8.0F),
+        makeSegment(3, 5, chanlun::Direction::Down, 12.0F, 9.0F),
+        makeSegment(5, 7, chanlun::Direction::Up, 13.0F, 9.0F),
+        makeSegment(7, 9, chanlun::Direction::Down, 11.0F, 8.5F),
+        makeSegment(9, 11, chanlun::Direction::Up, 12.0F, 9.5F),
+    };
+
+    const auto pivots = chanlun::buildPivots(segments);
+
+    require(pivots.size() == 1, "extension remains one pivot instead of sliding duplicates");
+    require(pivots[0].endIndex == 11, "pivot extension reaches the last overlapping segment");
+    require(pivots[0].status == chanlun::StructureStatus::Extending,
+            "pivot reports extending status while later units overlap");
+    requireNear(pivots[0].zg, 12.0F, "extension preserves initial ZG");
+    requireNear(pivots[0].zd, 9.0F, "extension preserves initial ZD");
+    requireNear(pivots[0].gg, 13.0F, "extension updates GG");
+    requireNear(pivots[0].dd, 8.0F, "extension updates DD");
+}
+
+void testPivotExtensionTerminatesAfterConfirmedDeparture()
+{
+    const std::vector<chanlun::Segment> segments{
+        makeSegment(1, 3, chanlun::Direction::Up, 12.0F, 8.0F),
+        makeSegment(3, 5, chanlun::Direction::Down, 12.0F, 9.0F),
+        makeSegment(5, 7, chanlun::Direction::Up, 13.0F, 9.0F),
+        makeSegment(7, 9, chanlun::Direction::Down, 16.0F, 14.0F),
+    };
+
+    const auto pivots = chanlun::buildPivots(segments);
+
+    require(pivots.size() == 1, "departing segment does not create another pivot");
+    require(pivots[0].status == chanlun::StructureStatus::Terminated,
+            "confirmed departure terminates the pivot");
+    require(pivots[0].endIndex == 7, "terminated pivot ends before the departing segment");
+}
+
+void testNewSameLevelPivotMustNotOverlapPreviousPivot()
+{
+    const std::vector<chanlun::Segment> segments{
+        makeSegment(1, 3, chanlun::Direction::Up, 12.0F, 8.0F),
+        makeSegment(3, 5, chanlun::Direction::Down, 12.0F, 9.0F),
+        makeSegment(5, 7, chanlun::Direction::Up, 13.0F, 9.0F),
+        makeSegment(7, 9, chanlun::Direction::Down, 16.0F, 14.0F),
+        makeSegment(9, 11, chanlun::Direction::Up, 15.0F, 13.0F),
+        makeSegment(11, 13, chanlun::Direction::Down, 15.5F, 13.5F),
+    };
+
+    const auto pivots = chanlun::buildPivots(segments);
+
+    require(pivots.size() == 2, "non-overlapping same-level pivot is retained");
+    require(pivots[1].startIndex == 7, "new pivot starts after the terminated pivot");
+    require(pivots[1].status == chanlun::StructureStatus::Confirmed,
+            "new same-level pivot starts as confirmed");
 }
 
 void testMacdSupportsDefaultSignalLayer()
@@ -304,13 +506,87 @@ void testStrokePivotExtendsInsteadOfRepeatingSlidingWindows()
         makeStroke(1, 5, chanlun::Direction::Up, 12.0F, 8.0F),
         makeStroke(5, 9, chanlun::Direction::Down, 12.0F, 9.0F),
         makeStroke(9, 13, chanlun::Direction::Up, 13.0F, 9.0F),
-        makeStroke(13, 17, chanlun::Direction::Down, 11.0F, 8.5F),
+        makeStroke(13, 17, chanlun::Direction::Down, 13.0F, 8.5F),
     };
     const auto pivots = chanlun::buildStrokePivots(strokes);
     require(pivots.size() == 1, "adjacent overlapping triples extend one pivot");
     require(pivots[0].endIndex == 17, "extension reaches the fourth stroke");
+    require(pivots[0].status == chanlun::StructureStatus::Extending,
+            "stroke pivot reports extending status");
     requireNear(pivots[0].zg, 12.0F, "extension preserves initial ZG");
     requireNear(pivots[0].zd, 9.0F, "extension preserves initial ZD");
+}
+
+void testStrokePivotWaitsForConfirmedExtension()
+{
+    std::vector<chanlun::Stroke> strokes{
+        makeStroke(1, 5, chanlun::Direction::Up, 12.0F, 8.0F),
+        makeStroke(5, 9, chanlun::Direction::Down, 12.0F, 9.0F),
+        makeStroke(9, 13, chanlun::Direction::Up, 13.0F, 9.0F),
+        makeStroke(13, 17, chanlun::Direction::Down, 13.0F, 8.5F),
+    };
+    strokes[3].status = chanlun::StructureStatus::Candidate;
+
+    const auto pivots = chanlun::buildStrokePivots(strokes);
+
+    require(pivots.size() == 1, "three confirmed strokes still form a pivot");
+    require(pivots[0].endIndex == 13, "candidate stroke does not extend pivot");
+    require(pivots[0].status == chanlun::StructureStatus::Confirmed,
+            "candidate stroke does not change pivot status");
+}
+
+void testStrokePivotTerminatesOnConfirmedDeparture()
+{
+    const std::vector<chanlun::Stroke> strokes{
+        makeStroke(1, 5, chanlun::Direction::Up, 12.0F, 8.0F),
+        makeStroke(5, 9, chanlun::Direction::Down, 12.0F, 9.0F),
+        makeStroke(9, 13, chanlun::Direction::Up, 13.0F, 9.0F),
+        makeStroke(13, 17, chanlun::Direction::Down, 13.0F, 10.0F),
+        makeStroke(17, 21, chanlun::Direction::Up, 16.0F, 10.0F),
+        makeStroke(21, 25, chanlun::Direction::Down, 16.0F, 14.0F),
+    };
+
+    const auto pivots = chanlun::buildStrokePivots(strokes);
+
+    require(pivots.size() == 1, "departing stroke does not create another pivot");
+    require(pivots[0].status == chanlun::StructureStatus::Terminated,
+            "confirmed departure terminates stroke pivot");
+    require(pivots[0].endIndex == 21, "confirmed outside pullback stays outside pivot");
+}
+
+void testStrokePivotRejectsInconsistentSharedPrices()
+{
+    const std::vector<chanlun::Stroke> strokes{
+        makeStroke(0, 4, chanlun::Direction::Up, 12, 8),
+        makeStroke(4, 8, chanlun::Direction::Down, 13, 9),
+        makeStroke(8, 12, chanlun::Direction::Up, 14, 9),
+    };
+    require(chanlun::buildStrokePivots(strokes).empty(),
+            "shared stroke index must also share its endpoint price");
+}
+
+void testStrokePivotWaitsForOutsidePullback()
+{
+    std::vector<chanlun::Stroke> strokes{
+        makeStroke(0, 4, chanlun::Direction::Up, 12, 8),
+        makeStroke(4, 8, chanlun::Direction::Down, 12, 9),
+        makeStroke(8, 12, chanlun::Direction::Up, 13, 9),
+    };
+    auto pivots = chanlun::buildStrokePivots(strokes);
+    require(pivots.size() == 1 && pivots[0].status != chanlun::StructureStatus::Terminated,
+            "an upward departure alone does not terminate the pivot");
+    strokes.push_back(makeStroke(12, 16, chanlun::Direction::Down, 13, 12));
+    pivots = chanlun::buildStrokePivots(strokes);
+    require(pivots.size() == 1 && pivots[0].status != chanlun::StructureStatus::Terminated,
+            "boundary contact remains pivot overlap");
+    strokes.back().low = 12.5F;
+    pivots = chanlun::buildStrokePivots(strokes);
+    require(pivots.size() == 1 && pivots[0].status == chanlun::StructureStatus::Terminated,
+            "a confirmed first pullback strictly outside the pivot terminates it");
+    strokes.back().status = chanlun::StructureStatus::Candidate;
+    pivots = chanlun::buildStrokePivots(strokes);
+    require(pivots[0].status != chanlun::StructureStatus::Terminated,
+            "candidate pullback must not terminate pivot");
 }
 
 void testAdjacentPivotBoundariesKeepBothPriceRanges()
@@ -329,6 +605,27 @@ void testAdjacentPivotBoundariesKeepBothPriceRanges()
     requireNear(leftLow[5], 17.0F, "next pivot left low survives shared index");
     requireNear(rightHigh[4], 0.0F, "right boundary only appears at end");
     requireNear(leftHigh[6], 0.0F, "left boundary only appears at start");
+}
+
+void testPivotTraceAndCandidateProjection()
+{
+    const std::vector<chanlun::Stroke> strokes{
+        makeStroke(0, 4, chanlun::Direction::Up, 12, 8),
+        makeStroke(4, 8, chanlun::Direction::Down, 12, 9),
+        makeStroke(8, 12, chanlun::Direction::Up, 13, 9),
+        makeStroke(12, 16, chanlun::Direction::Down, 13, 12.5F),
+        makeStroke(16, 20, chanlun::Direction::Up, 16, 12.5F),
+    };
+    auto pivots = chanlun::buildStrokePivots(strokes);
+    require(pivots.size() == 1 && pivots[0].strokeIndices == std::vector<int>({0, 1, 2}),
+            "pivot records all constituent strokes");
+    require(pivots[0].confirmationIndex == 16 && pivots[0].terminationIndex == 20,
+            "pivot records reverse-stroke confirmation and termination evidence");
+    pivots[0].status = chanlun::StructureStatus::Candidate;
+    for (float value : chanlun::projectStrokePivotBoundary(pivots, 25, true, true))
+    {
+        requireNear(value, 0, "unresolved related candidate is not drawn as confirmed box");
+    }
 }
 
 void testStrokeCandidateRemovesUnconfirmedCounterMove()
@@ -564,15 +861,45 @@ void test300652HistoricalChainRecovers()
         }
     }
     require(foundAugustContainment, "300652 August containment group is present");
-    bool hasRevalidatedDownStroke = false;
+    const std::vector<std::string> expectedDates{
+        "2024-06-19", "2024-07-05", "2024-07-12",
+        "2024-07-25", "2024-08-01", "2024-08-28"};
+    size_t retainedTurns = 0;
     for (const auto &stroke : analysis.strokes)
     {
         require(stroke.startIndex < stroke.endIndex, "300652 stroke points forward in time");
-        hasRevalidatedDownStroke |= dates[stroke.startIndex] == "2024-06-19" &&
-                                    dates[stroke.endIndex] == "2024-08-28" &&
-                                    stroke.direction == chanlun::Direction::Down;
+        for (size_t turn = 1; turn < expectedDates.size(); ++turn)
+        {
+            if (dates[stroke.startIndex] != expectedDates[turn - 1] ||
+                dates[stroke.endIndex] != expectedDates[turn]) continue;
+            int startBar = -1;
+            int endBar = -1;
+            for (const auto &fractal : analysis.fractals)
+            {
+                if (fractal.originalIndex == stroke.startIndex) startBar = fractal.barIndex;
+                if (fractal.originalIndex == stroke.endIndex) endBar = fractal.barIndex;
+            }
+            require(startBar >= 0 && endBar - startBar >= 4,
+                    "300652 retained turn has independent merged bar");
+            const bool down = turn % 2 == 1;
+            const float top = analysis.mergedBars[down ? startBar : endBar].high;
+            const float bottom = analysis.mergedBars[down ? endBar : startBar].low;
+            require(top > bottom && stroke.direction ==
+                        (down ? chanlun::Direction::Down : chanlun::Direction::Up),
+                    "300652 retained turns alternate with valid prices");
+            for (int bar = startBar; bar <= endBar; ++bar)
+            {
+                require(analysis.mergedBars[bar].high <= top &&
+                            analysis.mergedBars[bar].low >= bottom,
+                        "300652 retained endpoints cover every merged bar");
+            }
+            require(stroke.status == chanlun::StructureStatus::Confirmed,
+                    "300652 middle stroke has a valid reverse confirmation");
+            ++retainedTurns;
+        }
     }
-    require(hasRevalidatedDownStroke, "300652 invalid intermediate turns extend the June down stroke");
+    require(retainedTurns == expectedDates.size() - 1,
+            "300652 retains valid intermediate turns instead of forcing one June-August stroke");
     for (size_t index = 1; index < analysis.strokes.size(); ++index)
     {
         require(analysis.strokes[index - 1].endIndex == analysis.strokes[index].startIndex,
@@ -1037,6 +1364,20 @@ void testTdxAdapterReturnsZeroSeriesForUnknownFunction()
 
 int main(int argc, char **argv)
 {
+    if (argc == 3 && std::string(argv[1]) == "--test")
+    {
+        const std::string name = argv[2];
+        if (name == "300652") test300652HistoricalChainRecovers();
+        else if (name == "000801") test000801HistoricalTailRevalidates();
+        else if (name == "300383") test300383PreservesValidPrefix();
+        else if (name == "continuation") testHistoricalStrokeChainsContinue();
+        else if (name == "reversals") testRecentHistoryDoesNotEraseValidReversals();
+        else if (name == "windows") testHistoryWindowRetainsLaterStrokes();
+        else if (name == "prefix") testConfirmedDecemberPrefixSurvivesLaterData();
+        else if (name == "confirmation") testStrokeConfirmationRequiresValidReverseStroke();
+        else require(false, "unknown named regression " + name);
+        return 0;
+    }
     if (argc == 2)
     {
         std::ifstream input(argv[1]);
@@ -1103,6 +1444,12 @@ int main(int argc, char **argv)
             std::cout << dates[stroke.startIndex] << ' ' << (stroke.direction == chanlun::Direction::Up ? low[stroke.startIndex] : high[stroke.startIndex])
                       << " -> " << dates[stroke.endIndex] << ' ' << (stroke.direction == chanlun::Direction::Up ? high[stroke.endIndex] : low[stroke.endIndex]) << "\n";
         }
+        for (const auto &segment : analysis.segments)
+        {
+            std::cout << "S " << dates[segment.startIndex] << " -> " << dates[segment.endIndex]
+                      << " direction=" << chanlun::toInt(segment.direction)
+                      << " status=" << chanlun::toInt(segment.status) << "\n";
+        }
         const auto strokePivots = chanlun::buildStrokePivots(analysis.strokes);
         std::cout << "stroke pivots " << strokePivots.size() << "\n";
         for (const auto &pivot : strokePivots)
@@ -1112,6 +1459,9 @@ int main(int argc, char **argv)
         }
         return 0;
     }
+    testStrokeConfirmationRequiresValidReverseStroke();
+    testSegmentOutputsAreDisabled();
+    testLaterExtremePreservesConfirmedPrefix();
     testSequentialContainmentUsesTrendDirection();
     testPendingContainmentWaitsForDirection();
     testInitialContainmentDoesNotUseBoundingEnvelope();
@@ -1124,7 +1474,12 @@ int main(int argc, char **argv)
     testThreeOverlappingStrokesFormStrokeLevelPivot();
     testStrokePivotProjectionUsesSeparateFunctionIds();
     testStrokePivotExtendsInsteadOfRepeatingSlidingWindows();
+    testStrokePivotWaitsForConfirmedExtension();
+    testStrokePivotTerminatesOnConfirmedDeparture();
+    testStrokePivotRejectsInconsistentSharedPrices();
+    testStrokePivotWaitsForOutsidePullback();
     testAdjacentPivotBoundariesKeepBothPriceRanges();
+    testPivotTraceAndCandidateProjection();
     testStrokeCandidateRemovesUnconfirmedCounterMove();
     testDownStrokeExtendsPastUnconfirmedRebound();
     testInvalidReversalRollsBackEarlierStrokes();
@@ -1136,8 +1491,13 @@ int main(int argc, char **argv)
     testUpStrokeCandidateExtendsToNewHigh();
     testStrokeEndpointMustCoverEveryMergedBar();
     testInvalidCandidateDoesNotBreakStrokeChain();
-    testSegmentsRequireThreeOverlappingStrokes();
+    testCandidateSegmentsDoNotFormPivots();
     testPivotsUseThreeOverlappingSegments();
+    testPivotsRequireConnectedConfirmedSegments();
+    testPivotAllowsSinglePriceOverlap();
+    testPivotExtensionDoesNotCreateSlidingWindowDuplicates();
+    testPivotExtensionTerminatesAfterConfirmedDeparture();
+    testNewSameLevelPivotMustNotOverlapPreviousPivot();
     testMacdSupportsDefaultSignalLayer();
     testTdxAdapterProjectsFractalSeries();
     testContainmentMarkersProjectMergedGroupBoundaries();

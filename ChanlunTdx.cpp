@@ -152,6 +152,10 @@ std::vector<float> projectSegments(const ChanlunAnalysis &analysis, size_t count
     std::vector<float> out = zeroSeries(count);
     for (const Segment &segment : analysis.segments)
     {
+        if (segment.status != StructureStatus::Confirmed)
+        {
+            continue;
+        }
         setIfInRange(out, segment.startIndex, segment.direction == Direction::Up ? -1.0F : 1.0F);
         setIfInRange(out, segment.endIndex, segment.direction == Direction::Up ? 1.0F : -1.0F);
     }
@@ -184,6 +188,7 @@ std::vector<float> projectStrokePivotValue(const ChanlunAnalysis &analysis, size
     std::vector<float> out = zeroSeries(count);
     for (const Pivot &pivot : buildStrokePivots(analysis.strokes))
     {
+        if (pivot.status == StructureStatus::Candidate || pivot.status == StructureStatus::Invalid) continue;
         fillRange(out, pivot.startIndex, pivot.endIndex, highValue ? pivot.zg : pivot.zd);
     }
     return out;
@@ -194,6 +199,7 @@ std::vector<float> projectStrokePivotStartEnd(const ChanlunAnalysis &analysis, s
     std::vector<float> out = zeroSeries(count);
     for (const Pivot &pivot : buildStrokePivots(analysis.strokes))
     {
+        if (pivot.status == StructureStatus::Candidate || pivot.status == StructureStatus::Invalid) continue;
         setIfInRange(out, pivot.startIndex, 1.0F);
         setIfInRange(out, pivot.endIndex, 2.0F);
     }
@@ -269,6 +275,7 @@ std::vector<float> projectStrokePivotBoundary(const std::vector<Pivot> &pivots,
     std::vector<float> out = zeroSeries(count);
     for (const Pivot &pivot : pivots)
     {
+        if (pivot.status == StructureStatus::Candidate || pivot.status == StructureStatus::Invalid) continue;
         setIfInRange(out, leftBoundary ? pivot.startIndex : pivot.endIndex,
                      highValue ? pivot.zg : pivot.zd);
     }
@@ -313,7 +320,7 @@ std::vector<float> evaluateTdxFunction(int functionId,
     case 204:
         return projectTrendKind(analysis, count);
     case 205:
-        return projectTrendCompletion(analysis, count);
+        return zeroSeries(count);
     case 210:
         return projectStrokePivotValue(analysis, count, true);
     case 211:

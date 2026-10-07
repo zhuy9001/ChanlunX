@@ -10,6 +10,10 @@ Each function returns one `float` series. Empty bars are `0`.
 
 ## Function Map
 
+笔级中枢要求已确认笔按索引、方向及共享端点价格连续。离开笔本身不直接终结中枢；第一条已确认反向回试严格位于原区间外时才终结，触及边界仍算重叠。候选笔不延伸方框。内部记录构成笔索引、反向笔提供的确认依据位置和终结依据位置；这些位置不是分型右侧 K 线的精确确认时刻。与前一中枢重叠的后续结构保留为关联候选，不经 `210-216` 画成独立已确认方框；高级别递归扩展尚未实现。
+
+当前版本暂时移除新核心线段识别：`120`、段级中枢 `200-205` 及其依赖信号 `300/400` 返回全零。笔 `110`、包含标记 `102-105`、笔级中枢 `210-216` 和 MACD `320` 保持可用。编号保留供公式兼容；旧接口 `3/4` 的独立历史算法未删除，不属于新核心计算链。
+
 | Function | Output |
 | --- | --- |
 | `100` | Merged K-line direction: `1=up`, `-1=down` |
@@ -19,7 +23,7 @@ Each function returns one `float` series. Empty bars are `0`.
 | `104` | Containment group start marker |
 | `105` | Containment group end marker |
 | `110` | Stroke endpoint marker: `1=top`, `-1=bottom` |
-| `120` | Segment endpoint marker: `1=top`, `-1=bottom` |
+| `120` | Confirmed segment endpoint marker: `1=top`, `-1=bottom`; pending candidates output `0` |
 | `200` | Pivot `ZG` |
 | `201` | Pivot `ZD` |
 | `202` | Pivot start/end marker: `1=start`, `2=end` |
@@ -37,6 +41,8 @@ Each function returns one `float` series. Empty bars are `0`.
 | `320` | Default MACD histogram |
 | `400` | Operation state derived from implemented buy/sell signals: `1=hold`, `-1=cash`, `0=neutral` |
 | `900` | Debug merged K-line id |
+
+`120` uses confirmed strokes to form a three-stroke segment candidate, then standardizes the opposite-direction feature sequence. A no-gap feature fractal confirms the endpoint; a gap requires a confirming fractal in the reverse feature sequence. Candidates are not projected by `120` and do not contribute to segment-level pivots (`200-205`). Legacy functions `3` and `4` retain their separate drawing algorithms and are not interchangeable with `120`.
 
 ## Example
 

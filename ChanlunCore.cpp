@@ -66,6 +66,7 @@ bool rangesOverlap(float highA, float lowA, float highB, float lowB, float highC
     const float high = std::min(std::min(highA, highB), highC);
     return low <= high;
 }
+
 }
 
 int toInt(Direction direction)
@@ -276,221 +277,130 @@ std::vector<Stroke> buildStrokes(const std::vector<MergedBar> &bars, const std::
         return strokes;
     }
 
+    const auto canConnect = [&](int start, int end) {
+        const Fractal &left = fractals[static_cast<size_t>(start)];
+        const Fractal &right = fractals[static_cast<size_t>(end)];
+        return left.type != right.type && right.barIndex > left.barIndex &&
+               hasIndependentBarBetween(left, right) && coversRange(left, right) &&
+               (left.type == FractalType::Top ? left.price > right.price : right.price > left.price);
+    };
     std::vector<int> selected;
-    std::vector<int> deferredTail;
-    int deferredCandidate = -1;
+    std::vector<std::vector<int>> deferred;
     int initialOpposite = -1;
-    int pendingExtreme = -1;
-    for (size_t index = 0; index < fractals.size();)
+    for (size_t index = 0; index < fractals.size(); ++index)
     {
-        size_t extreme = index;
-        while (index + 1 < fractals.size() && fractals[index + 1].type == fractals[extreme].type)
+        const int candidateIndex = static_cast<int>(index);
+        const Fractal &candidate = fractals[index];
+        if (selected.empty())
         {
-            ++index;
-            if (isMoreExtreme(fractals[index], fractals[extreme]))
-            {
-                extreme = index;
-            }
+            selected.push_back(candidateIndex);
+            continue;
         }
-        ++index;
-        const Fractal &candidate = fractals[extreme];
-        if (deferredCandidate >= 0 && !deferredTail.empty())
+        bool restored = false;
+        for (auto saved = deferred.rbegin(); saved != deferred.rend(); ++saved)
         {
-            const Fractal &deferredLast = fractals[static_cast<size_t>(deferredTail.back())];
-            if (candidate.type == fractals[static_cast<size_t>(deferredCandidate)].type &&
-                isMoreExtreme(candidate, fractals[static_cast<size_t>(deferredCandidate)]) &&
-                hasIndependentBarBetween(deferredLast, candidate) && coversRange(deferredLast, candidate) &&
-                selected.size() >= 1 && selected.back() == deferredTail.front())
+            if (canConnect(saved->back(), candidateIndex))
             {
-                selected.insert(selected.end(), deferredTail.begin() + 1, deferredTail.end());
-                pendingExtreme = -1;
-                deferredTail.clear();
-                deferredCandidate = -1;
-            }
-            else if (candidate.type == deferredLast.type && isMoreExtreme(candidate, deferredLast))
-            {
-                deferredTail.clear();
-                deferredCandidate = -1;
-            }
-        }
-        if (pendingExtreme >= 0 && selected.size() >= 3)
-        {
-            const Fractal &pending = fractals[static_cast<size_t>(pendingExtreme)];
-            if (candidate.type == pending.type && isMoreExtreme(candidate, pending))
-            {
-                pendingExtreme = static_cast<int>(extreme);
-            }
-            const Fractal &updated = fractals[static_cast<size_t>(pendingExtreme)];
-            const Fractal &last = fractals[static_cast<size_t>(selected.back())];
-            if (hasIndependentBarBetween(last, updated) && coversRange(last, updated))
-            {
-                selected.push_back(pendingExtreme);
-                pendingExtreme = -1;
-            }
-            else if (candidate.type == last.type && isMoreExtreme(candidate, last) &&
-                     hasIndependentBarBetween(updated, candidate) && coversRange(updated, candidate))
-            {
-                const Fractal &anchor = fractals[static_cast<size_t>(selected[selected.size() - 3])];
-                if (hasIndependentBarBetween(anchor, updated) && coversRange(anchor, updated))
+                bool valid = true;
+                for (size_t endpoint = 1; endpoint < saved->size(); ++endpoint)
                 {
-                    selected.resize(selected.size() - 2);
-                    selected.push_back(pendingExtreme);
-                    pendingExtreme = -1;
+                    if (!canConnect((*saved)[endpoint - 1], (*saved)[endpoint]))
+                    {
+                        valid = false;
+                        break;
+                    }
                 }
-            }
-        }
-        while (!selected.empty())
-        {
-            const Fractal &last = fractals[static_cast<size_t>(selected.back())];
-            if (candidate.type == last.type)
-            {
-                if (selected.size() == 1 && initialOpposite >= 0 &&
-                    isMoreExtreme(candidate, last) &&
-                    hasIndependentBarBetween(fractals[static_cast<size_t>(initialOpposite)], candidate) &&
-                    coversRange(fractals[static_cast<size_t>(initialOpposite)], candidate))
+                if (!valid)
                 {
-                    selected.back() = initialOpposite;
-                    selected.push_back(static_cast<int>(extreme));
-                    initialOpposite = -1;
-                    break;
-                }
-                if (isMoreExtreme(candidate, last) &&
-                    (selected.size() == 1 || coversRange(fractals[static_cast<size_t>(selected[selected.size() - 2])], candidate)))
-                {
-                    selected.pop_back();
                     continue;
                 }
-                break;
-            }
-            if (hasIndependentBarBetween(last, candidate) && coversRange(last, candidate))
-            {
-                selected.push_back(static_cast<int>(extreme));
-                initialOpposite = -1;
-                break;
-            }
-            if (selected.size() == 1 &&
-                (initialOpposite < 0 || isMoreExtreme(candidate, fractals[static_cast<size_t>(initialOpposite)])))
-            {
-                initialOpposite = static_cast<int>(extreme);
-            }
-            if (selected.size() >= 3 &&
-                isMoreExtreme(candidate, fractals[static_cast<size_t>(selected[selected.size() - 2])]))
-            {
-                if (selected.size() == 3 ||
-                    !isMoreExtreme(fractals[static_cast<size_t>(selected.back())],
-                                   fractals[static_cast<size_t>(selected[selected.size() - 3])]))
+                size_t common = 0;
+                while (common < selected.size() && common < saved->size() &&
+                       selected[common] == (*saved)[common])
                 {
-                    if (pendingExtreme < 0 ||
-                        isMoreExtreme(candidate, fractals[static_cast<size_t>(pendingExtreme)]))
-                    {
-                        pendingExtreme = static_cast<int>(extreme);
-                    }
+                    ++common;
+                }
+                if (common > 0 && common + 1 >= selected.size())
+                {
+                    selected = *saved;
+                    selected.push_back(candidateIndex);
+                    restored = true;
                     break;
                 }
-                const int extension = selected.back();
-                if (candidate.barIndex - last.barIndex > 1 && selected.size() >= 3)
+            }
+        }
+        if (restored)
+        {
+            deferred.clear();
+            initialOpposite = -1;
+            continue;
+        }
+        const Fractal &last = fractals[static_cast<size_t>(selected.back())];
+        if (canConnect(selected.back(), candidateIndex))
+        {
+            selected.push_back(candidateIndex);
+            deferred.clear();
+            initialOpposite = -1;
+            continue;
+        }
+        if (candidate.type == last.type)
+        {
+            if (!isMoreExtreme(candidate, last))
+            {
+                continue;
+            }
+            if (selected.size() == 1 && initialOpposite >= 0 &&
+                canConnect(initialOpposite, candidateIndex))
+            {
+                selected = {initialOpposite, candidateIndex};
+                initialOpposite = -1;
+                continue;
+            }
+            deferred.push_back(selected);
+            selected.back() = candidateIndex;
+        }
+        else
+        {
+            if (selected.size() == 1)
+            {
+                if (initialOpposite < 0 ||
+                    isMoreExtreme(candidate, fractals[static_cast<size_t>(initialOpposite)]))
                 {
-                    deferredTail.assign(selected.end() - 3, selected.end());
-                    deferredCandidate = static_cast<int>(extreme);
-                }
-                selected.pop_back();
-                selected.pop_back();
-                if (!selected.empty() &&
-                    isMoreExtreme(fractals[static_cast<size_t>(extension)],
-                                  fractals[static_cast<size_t>(selected.back())]) &&
-                    (selected.size() == 1 ||
-                     coversRange(fractals[static_cast<size_t>(selected[selected.size() - 2])],
-                                 fractals[static_cast<size_t>(extension)])))
-                {
-                    selected.back() = extension;
+                    initialOpposite = candidateIndex;
                 }
                 continue;
             }
-            break;
-        }
-        if (selected.empty())
-        {
-            selected.push_back(static_cast<int>(extreme));
-        }
-        if (pendingExtreme >= 0 && pendingExtreme <= selected.back())
-        {
-            pendingExtreme = -1;
-        }
-    }
-    if (pendingExtreme >= 0 || selected.size() <= 2 ||
-        (!selected.empty() && selected.back() + 1 < static_cast<int>(fractals.size())))
-    {
-        const int lastSelected = selected.back();
-        std::vector<int> best = selected;
-        size_t bestRetained = selected.size();
-        const auto tryAnchor = [&](int anchor, size_t retained) {
-            std::vector<std::vector<int>> paths(fractals.size());
-            paths[static_cast<size_t>(anchor)] = {anchor};
-            for (size_t end = static_cast<size_t>(anchor + 1); end < fractals.size(); ++end)
+            const Fractal &previous = fractals[static_cast<size_t>(selected[selected.size() - 2])];
+            if (!isMoreExtreme(candidate, previous))
             {
-                for (size_t start = static_cast<size_t>(anchor); start < end; ++start)
-                {
-                    if (paths[start].empty() || fractals[start].type == fractals[end].type ||
-                        !hasIndependentBarBetween(fractals[start], fractals[end]) ||
-                        !coversRange(fractals[start], fractals[end]))
-                    {
-                        continue;
-                    }
-                    if (paths[end].size() < paths[start].size() + 1)
-                    {
-                        paths[end] = paths[start];
-                        paths[end].push_back(static_cast<int>(end));
-                    }
-                }
-                const size_t pathSize = retained + paths[end].size() - 1;
-                if (static_cast<int>(end) > lastSelected && paths[end].size() > 1 &&
-                    (pathSize > best.size() ||
-                     (pathSize == best.size() &&
-                      (static_cast<int>(end) > best.back() ||
-                       (static_cast<int>(end) == best.back() && retained > bestRetained)))))
-                {
-                    best.assign(selected.begin(), selected.begin() + static_cast<std::ptrdiff_t>(retained));
-                    best.insert(best.end(), paths[end].begin() + 1, paths[end].end());
-                    bestRetained = retained;
-                }
+                continue;
             }
-        };
-        for (size_t retained = selected.size(); retained > (selected.size() > 3 ? selected.size() - 2 : 0); --retained)
-        {
-            tryAnchor(selected[retained - 1], retained);
-        }
-        if (best.back() == lastSelected)
-        {
-            for (size_t anchor = static_cast<size_t>(selected.front() + 1); anchor < fractals.size(); ++anchor)
+            deferred.push_back(selected);
+            if (selected.size() == 3)
             {
-                std::vector<std::vector<int>> paths(fractals.size());
-                paths[anchor] = {static_cast<int>(anchor)};
-                for (size_t end = anchor + 1; end < fractals.size(); ++end)
-                {
-                    for (size_t start = anchor; start < end; ++start)
-                    {
-                        if (paths[start].empty() || fractals[start].type == fractals[end].type ||
-                            !hasIndependentBarBetween(fractals[start], fractals[end]) ||
-                            !coversRange(fractals[start], fractals[end]))
-                        {
-                            continue;
-                        }
-                        if (paths[end].size() < paths[start].size() + 1)
-                        {
-                            paths[end] = paths[start];
-                            paths[end].push_back(static_cast<int>(end));
-                        }
-                    }
-                    if (static_cast<int>(end) >= lastSelected &&
-                        (paths[end].size() > best.size() ||
-                         (paths[end].size() == best.size() && static_cast<int>(end) > best.back())))
-                    {
-                        best = paths[end];
-                    }
-                }
+                continue;
+            }
+            selected.pop_back();
+            selected.back() = candidateIndex;
+        }
+        while (selected.size() >= 2 &&
+               !canConnect(selected[selected.size() - 2], selected.back()))
+        {
+            const int endpoint = selected.back();
+            if (selected.size() == 2)
+            {
+                initialOpposite = selected.front();
+                selected = {endpoint};
+                break;
+            }
+            selected.pop_back();
+            selected.pop_back();
+            const Fractal &earlier = fractals[static_cast<size_t>(selected.back())];
+            if (isMoreExtreme(candidate, earlier))
+            {
+                selected.back() = endpoint;
             }
         }
-        selected = std::move(best);
     }
     for (size_t i = 1; i < selected.size(); ++i)
     {
@@ -507,7 +417,9 @@ std::vector<Stroke> buildStrokes(const std::vector<MergedBar> &bars, const std::
             strokeLow = std::min(strokeLow, bars[static_cast<size_t>(j)].low);
         }
 
-        strokes.push_back({start.originalIndex, end.originalIndex, direction, strokeHigh, strokeLow, StructureStatus::Confirmed});
+        const StructureStatus status = i + 1 < selected.size()
+            ? StructureStatus::Confirmed : StructureStatus::Candidate;
+        strokes.push_back({start.originalIndex, end.originalIndex, direction, strokeHigh, strokeLow, status});
     }
 
     return strokes;
@@ -515,52 +427,8 @@ std::vector<Stroke> buildStrokes(const std::vector<MergedBar> &bars, const std::
 
 std::vector<Segment> buildSegments(const std::vector<Stroke> &strokes)
 {
-    std::vector<Segment> segments;
-    if (strokes.size() < 3)
-    {
-        return segments;
-    }
-
-    size_t i = 0;
-    while (i + 2 < strokes.size())
-    {
-        const Stroke &a = strokes[i];
-        const Stroke &b = strokes[i + 1];
-        const Stroke &c = strokes[i + 2];
-        if (a.endIndex != b.startIndex || b.endIndex != c.startIndex)
-        {
-            ++i;
-            continue;
-        }
-        if (!rangesOverlap(a.high, a.low, b.high, b.low, c.high, c.low))
-        {
-            ++i;
-            continue;
-        }
-
-        Segment segment;
-        segment.startIndex = a.startIndex;
-        segment.endIndex = c.endIndex;
-        segment.direction = a.direction;
-        segment.high = std::max(std::max(a.high, b.high), c.high);
-        segment.low = std::min(std::min(a.low, b.low), c.low);
-        segment.status = StructureStatus::Confirmed;
-
-        size_t j = i + 3;
-        while (j < strokes.size() && segment.endIndex == strokes[j].startIndex &&
-               rangesOverlap(segment.high, segment.low, strokes[j].high, strokes[j].low))
-        {
-            segment.endIndex = strokes[j].endIndex;
-            segment.high = std::max(segment.high, strokes[j].high);
-            segment.low = std::min(segment.low, strokes[j].low);
-            ++j;
-        }
-
-        segments.push_back(segment);
-        i = std::max(j, i + 3);
-    }
-
-    return segments;
+    (void)strokes;
+    return {};
 }
 
 std::vector<Pivot> buildPivots(const std::vector<Segment> &segments, int level)
@@ -571,13 +439,19 @@ std::vector<Pivot> buildPivots(const std::vector<Segment> &segments, int level)
         return pivots;
     }
 
-    for (size_t i = 0; i + 2 < segments.size(); ++i)
+    for (size_t i = 0; i + 2 < segments.size();)
     {
         const Segment &a = segments[i];
         const Segment &b = segments[i + 1];
         const Segment &c = segments[i + 2];
-        if (!rangesOverlap(a.high, a.low, b.high, b.low, c.high, c.low))
+        if (a.status != StructureStatus::Confirmed ||
+            b.status != StructureStatus::Confirmed ||
+            c.status != StructureStatus::Confirmed ||
+            a.endIndex != b.startIndex ||
+            b.endIndex != c.startIndex ||
+            !rangesOverlap(a.high, a.low, b.high, b.low, c.high, c.low))
         {
+            ++i;
             continue;
         }
 
@@ -591,7 +465,33 @@ std::vector<Pivot> buildPivots(const std::vector<Segment> &segments, int level)
         pivot.gg = std::max(std::max(a.high, b.high), c.high);
         pivot.dd = std::min(std::min(a.low, b.low), c.low);
         pivot.status = StructureStatus::Confirmed;
-        pivots.push_back(pivot);
+
+        size_t next = i + 3;
+        while (next < segments.size() &&
+               pivot.endIndex == segments[next].startIndex &&
+               segments[next].status == StructureStatus::Confirmed &&
+               rangesOverlap(pivot.zg, pivot.zd, segments[next].high, segments[next].low))
+        {
+            pivot.endIndex = segments[next].endIndex;
+            pivot.gg = std::max(pivot.gg, segments[next].high);
+            pivot.dd = std::min(pivot.dd, segments[next].low);
+            pivot.status = StructureStatus::Extending;
+            ++next;
+        }
+
+        if (next < segments.size() &&
+            pivot.endIndex == segments[next].startIndex &&
+            segments[next].status == StructureStatus::Confirmed)
+        {
+            pivot.status = StructureStatus::Terminated;
+        }
+
+        if (pivots.empty() ||
+            !rangesOverlap(pivots.back().zg, pivots.back().zd, pivot.zg, pivot.zd))
+        {
+            pivots.push_back(pivot);
+        }
+        i = next;
     }
 
     return pivots;
@@ -599,43 +499,89 @@ std::vector<Pivot> buildPivots(const std::vector<Segment> &segments, int level)
 
 std::vector<Pivot> buildStrokePivots(const std::vector<Stroke> &strokes)
 {
+    const auto validStroke = [](const Stroke &stroke) {
+        return stroke.status == StructureStatus::Confirmed && stroke.startIndex < stroke.endIndex &&
+               stroke.high > stroke.low && std::isfinite(stroke.high) && std::isfinite(stroke.low) &&
+               stroke.direction != Direction::None;
+    };
+    const auto connected = [&](size_t left, size_t right) {
+        const Stroke &previous = strokes[left];
+        const Stroke &current = strokes[right];
+        return validStroke(previous) && validStroke(current) &&
+               previous.endIndex == current.startIndex && previous.direction != current.direction &&
+               (previous.direction == Direction::Up ? previous.high == current.high
+                                                    : previous.low == current.low);
+    };
+    const auto confirmedAt = [&](size_t index) {
+        if (index + 1 < strokes.size() && strokes[index].endIndex == strokes[index + 1].startIndex &&
+            strokes[index].direction != strokes[index + 1].direction)
+        {
+            return strokes[index + 1].endIndex;
+        }
+        return strokes[index].endIndex;
+    };
     std::vector<Pivot> pivots;
     for (size_t index = 0; index + 2 < strokes.size();)
     {
-        const Stroke &first = strokes[index];
-        const Stroke &second = strokes[index + 1];
-        const Stroke &third = strokes[index + 2];
-        if (first.endIndex != second.startIndex || second.endIndex != third.startIndex)
+        if (!connected(index, index + 1) || !connected(index + 1, index + 2) ||
+            !rangesOverlap(strokes[index].high, strokes[index].low,
+                           strokes[index + 1].high, strokes[index + 1].low,
+                           strokes[index + 2].high, strokes[index + 2].low))
         {
             ++index;
             continue;
         }
-        if (!rangesOverlap(first.high, first.low, second.high, second.low, third.high, third.low))
-        {
-            ++index;
-            continue;
-        }
-
-        Pivot pivot;
-        pivot.startIndex = first.startIndex;
-        pivot.endIndex = third.endIndex;
-        pivot.level = 0;
-        pivot.direction = first.direction;
-        pivot.zg = std::min(std::min(first.high, second.high), third.high);
-        pivot.zd = std::max(std::max(first.low, second.low), third.low);
-        pivot.gg = std::max(std::max(first.high, second.high), third.high);
-        pivot.dd = std::min(std::min(first.low, second.low), third.low);
+        Pivot pivot{};
+        pivot.startIndex = strokes[index].startIndex;
+        pivot.endIndex = strokes[index + 2].endIndex;
+        pivot.direction = strokes[index].direction;
+        pivot.zg = std::min({strokes[index].high, strokes[index + 1].high, strokes[index + 2].high});
+        pivot.zd = std::max({strokes[index].low, strokes[index + 1].low, strokes[index + 2].low});
+        pivot.gg = std::max({strokes[index].high, strokes[index + 1].high, strokes[index + 2].high});
+        pivot.dd = std::min({strokes[index].low, strokes[index + 1].low, strokes[index + 2].low});
         pivot.status = StructureStatus::Confirmed;
-        size_t next = index + 3;
-        while (next < strokes.size() && pivot.endIndex == strokes[next].startIndex &&
-               rangesOverlap(pivot.zg, pivot.zd, strokes[next].high, strokes[next].low))
+        pivot.confirmationIndex = confirmedAt(index + 2);
+        for (size_t member = index; member <= index + 2; ++member)
         {
-            pivot.endIndex = strokes[next].endIndex;
-            pivot.gg = std::max(pivot.gg, strokes[next].high);
-            pivot.dd = std::min(pivot.dd, strokes[next].low);
+            pivot.strokeIndices.push_back(static_cast<int>(member));
+        }
+        size_t next = index + 3;
+        while (next < strokes.size() && connected(next - 1, next))
+        {
+            const Stroke &stroke = strokes[next];
+            if (!rangesOverlap(pivot.zg, pivot.zd, stroke.high, stroke.low))
+            {
+                const Stroke &departure = strokes[next - 1];
+                const bool outsidePullback =
+                    (departure.direction == Direction::Up && stroke.direction == Direction::Down &&
+                     stroke.low > pivot.zg) ||
+                    (departure.direction == Direction::Down && stroke.direction == Direction::Up &&
+                     stroke.high < pivot.zd);
+                if (outsidePullback)
+                {
+                    pivot.status = StructureStatus::Terminated;
+                    pivot.terminationIndex = confirmedAt(next);
+                }
+                break;
+            }
+            pivot.endIndex = stroke.endIndex;
+            pivot.gg = std::max(pivot.gg, stroke.high);
+            pivot.dd = std::min(pivot.dd, stroke.low);
+            pivot.strokeIndices.push_back(static_cast<int>(next));
+            pivot.status = StructureStatus::Extending;
             ++next;
         }
-        pivots.push_back(pivot);
+        for (size_t previous = pivots.size(); previous > 0; --previous)
+        {
+            if (pivots[previous - 1].status == StructureStatus::Candidate) continue;
+            if (rangesOverlap(pivots[previous - 1].zg, pivots[previous - 1].zd, pivot.zg, pivot.zd))
+            {
+                pivot.relatedPivotIndex = static_cast<int>(previous - 1);
+                pivot.status = StructureStatus::Candidate;
+            }
+            break;
+        }
+        pivots.push_back(std::move(pivot));
         index = next;
     }
     return pivots;
@@ -673,12 +619,11 @@ ChanlunAnalysis analyze(const std::vector<float> &high,
                         const AnalysisOptions &options)
 {
     (void)close;
+    (void)options;
     ChanlunAnalysis analysis;
     analysis.mergedBars = mergeBars(high, low);
     analysis.fractals = findFractals(analysis.mergedBars);
     analysis.strokes = buildStrokes(analysis.mergedBars, analysis.fractals);
-    analysis.segments = buildSegments(analysis.strokes);
-    analysis.pivots = buildPivots(analysis.segments, options.level);
     analysis.trend = buildTrendSnapshot(analysis.pivots);
     return analysis;
 }
